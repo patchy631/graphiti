@@ -4,10 +4,10 @@
   </a>
 </p>
 
-<h1 align="center">
+<h2 align="center">
 Graphiti
-</h1>
-<h2 align="center"> Build Real-Time Knowledge Graphs for AI Agents</h2>
+</h2>
+<h3 align="center"> Build Real-Time Knowledge Graphs for AI Agents</h3>
 <div align="center">
 
 [![Lint](https://github.com/getzep/Graphiti/actions/workflows/lint.yml/badge.svg?style=flat)](https://github.com/getzep/Graphiti/actions/workflows/lint.yml)
