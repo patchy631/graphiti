@@ -3,11 +3,7 @@
     <img src="https://github.com/user-attachments/assets/119c5682-9654-4257-8922-56b7cb8ffd73" width="100" alt="Zep Logo">
   </a>
 </p>
-
-<h2 align="center">
-Graphiti
-</h2>
-<h3 align="center"> Build Real-Time Knowledge Graphs for AI Agents</h3>
+<h3 align="center"> Graphiti: Build Real-Time Knowledge Graphs for AI Agents</h3>
 <div align="center">
 
 [![Lint](https://github.com/getzep/Graphiti/actions/workflows/lint.yml/badge.svg?style=flat)](https://github.com/getzep/Graphiti/actions/workflows/lint.yml)
