@@ -14,78 +14,155 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
-import json
 from typing import Any, Protocol, TypedDict
 
 from pydantic import BaseModel, Field
 
 from .models import Message, PromptFunction, PromptVersion
+from .prompt_helpers import to_prompt_json
 
 
 class NodeDuplicate(BaseModel):
-    is_duplicate: bool = Field(..., description='true or false')
-    uuid: str | None = Field(
-        None,
-        description="uuid of the existing node like '5d643020624c42fa9de13f97b1b3fa39' or null",
+    id: int = Field(..., description='integer id of the entity')
+    duplicate_idx: int = Field(
+        ...,
+        description='idx of the duplicate entity. If no duplicate entities are found, default to -1.',
     )
     name: str = Field(
         ...,
-        description="Updated name of the new node (use the best name between the new node's name, an existing duplicate name, or a combination of both)",
+        description='Name of the entity. Should be the most complete and descriptive name of the entity. Do not include any JSON formatting in the Entity name such as {}.',
     )
+    duplicates: list[int] = Field(
+        ...,
+        description='idx of all entities that are a duplicate of the entity with the above id.',
+    )
+
+
+class NodeResolutions(BaseModel):
+    entity_resolutions: list[NodeDuplicate] = Field(..., description='List of resolved nodes')
 
 
 class Prompt(Protocol):
     node: PromptVersion
     node_list: PromptVersion
+    nodes: PromptVersion
 
 
 class Versions(TypedDict):
     node: PromptFunction
     node_list: PromptFunction
+    nodes: PromptFunction
 
 
 def node(context: dict[str, Any]) -> list[Message]:
     return [
         Message(
             role='system',
-            content='You are a helpful assistant that de-duplicates nodes from node lists.',
+            content='You are a helpful assistant that determines whether or not a NEW ENTITY is a duplicate of any EXISTING ENTITIES.',
         ),
         Message(
             role='user',
             content=f"""
         <PREVIOUS MESSAGES>
-        {json.dumps([ep for ep in context['previous_episodes']], indent=2)}
+        {to_prompt_json([ep for ep in context['previous_episodes']], ensure_ascii=context.get('ensure_ascii', False), indent=2)}
         </PREVIOUS MESSAGES>
         <CURRENT MESSAGE>
         {context['episode_content']}
         </CURRENT MESSAGE>
+        <NEW ENTITY>
+        {to_prompt_json(context['extracted_node'], ensure_ascii=context.get('ensure_ascii', False), indent=2)}
+        </NEW ENTITY>
+        <ENTITY TYPE DESCRIPTION>
+        {to_prompt_json(context['entity_type_description'], ensure_ascii=context.get('ensure_ascii', False), indent=2)}
+        </ENTITY TYPE DESCRIPTION>
 
-        <EXISTING NODES>
-        {json.dumps(context['existing_nodes'], indent=2)}
-        </EXISTING NODES>
+        <EXISTING ENTITIES>
+        {to_prompt_json(context['existing_nodes'], ensure_ascii=context.get('ensure_ascii', False), indent=2)}
+        </EXISTING ENTITIES>
         
-        Given the above EXISTING NODES and their attributes, MESSAGE, and PREVIOUS MESSAGES. Determine if the NEW NODE extracted from the conversation
-        is a duplicate entity of one of the EXISTING NODES.
+        Given the above EXISTING ENTITIES and their attributes, MESSAGE, and PREVIOUS MESSAGES; Determine if the NEW ENTITY extracted from the conversation
+        is a duplicate entity of one of the EXISTING ENTITIES.
+        
+        Entities should only be considered duplicates if they refer to the *same real-world object or concept*.
+        Semantic Equivalence: if a descriptive label in existing_entities clearly refers to a named entity in context, treat them as duplicates.
 
-        <NEW NODE>
-        {json.dumps(context['extracted_nodes'], indent=2)}
-        </NEW NODE>
+        Do NOT mark entities as duplicates if:
+        - They are related but distinct.
+        - They have similar names or purposes but refer to separate instances or concepts.
+
+         TASK:
+         1. Compare `new_entity` against each item in `existing_entities`.
+         2. If it refers to the same real‐world object or concept, collect its index.
+         3. Let `duplicate_idx` = the *first* collected index, or –1 if none.
+         4. Let `duplicates` = the list of *all* collected indices (empty list if none).
+        
+        Also return the full name of the NEW ENTITY (whether it is the name of the NEW ENTITY, a node it
+        is a duplicate of, or a combination of the two).
+        """,
+        ),
+    ]
+
+
+def nodes(context: dict[str, Any]) -> list[Message]:
+    return [
+        Message(
+            role='system',
+            content='You are a helpful assistant that determines whether or not ENTITIES extracted from a conversation are duplicates'
+            ' of existing entities.',
+        ),
+        Message(
+            role='user',
+            content=f"""
+        <PREVIOUS MESSAGES>
+        {to_prompt_json([ep for ep in context['previous_episodes']], ensure_ascii=context.get('ensure_ascii', True), indent=2)}
+        </PREVIOUS MESSAGES>
+        <CURRENT MESSAGE>
+        {context['episode_content']}
+        </CURRENT MESSAGE>
+        
+        
+        Each of the following ENTITIES were extracted from the CURRENT MESSAGE.
+        Each entity in ENTITIES is represented as a JSON object with the following structure:
+        {{
+            id: integer id of the entity,
+            name: "name of the entity",
+            entity_type: "ontological classification of the entity",
+            entity_type_description: "Description of what the entity type represents",
+            duplication_candidates: [
+                {{
+                    idx: integer index of the candidate entity,
+                    name: "name of the candidate entity",
+                    entity_type: "ontological classification of the candidate entity",
+                    ...<additional attributes>
+                }}
+            ]
+        }}
+        
+        <ENTITIES>
+        {to_prompt_json(context['extracted_nodes'], ensure_ascii=context.get('ensure_ascii', True), indent=2)}
+        </ENTITIES>
+        
+        <EXISTING ENTITIES>
+        {to_prompt_json(context['existing_nodes'], ensure_ascii=context.get('ensure_ascii', True), indent=2)}
+        </EXISTING ENTITIES>
+
+        For each of the above ENTITIES, determine if the entity is a duplicate of any of the EXISTING ENTITIES.
+
+        Entities should only be considered duplicates if they refer to the *same real-world object or concept*.
+
+        Do NOT mark entities as duplicates if:
+        - They are related but distinct.
+        - They have similar names or purposes but refer to separate instances or concepts.
+
         Task:
-        1. If the New Node represents the same entity as any node in Existing Nodes, return 'is_duplicate: true' in the 
-            response. Otherwise, return 'is_duplicate: false'
-        2. If is_duplicate is true, also return the uuid of the existing node in the response
-        3. If is_duplicate is true, return a name for the node that is the most complete full name.
-
-        Guidelines:
-        1. Use both the name and summary of nodes to determine if the entities are duplicates, 
-            duplicate nodes may have different names
-
-        Respond with a JSON object in the following format:
-            {{
-                "is_duplicate": true or false,
-                "uuid": "uuid of the existing node like 5d643020624c42fa9de13f97b1b3fa39 or null",
-                "name": "Updated name of the new node (use the best name between the new node's name, an existing duplicate name, or a combination of both)"
-            }}
+        Your response will be a list called entity_resolutions which contains one entry for each entity.
+        
+        For each entity, return the id of the entity as id, the name of the entity as name, and the duplicate_idx
+        as an integer.
+        
+        - If an entity is a duplicate of one of the EXISTING ENTITIES, return the idx of the candidate it is a 
+        duplicate of.
+        - If an entity is not a duplicate of one of the EXISTING ENTITIES, return the -1 as the duplication_idx
         """,
         ),
     ]
@@ -103,7 +180,7 @@ def node_list(context: dict[str, Any]) -> list[Message]:
         Given the following context, deduplicate a list of nodes:
 
         Nodes:
-        {json.dumps(context['nodes'], indent=2)}
+        {to_prompt_json(context['nodes'], ensure_ascii=context.get('ensure_ascii', True), indent=2)}
 
         Task:
         1. Group nodes together such that all duplicate nodes are in the same list of uuids
@@ -128,4 +205,4 @@ def node_list(context: dict[str, Any]) -> list[Message]:
     ]
 
 
-versions: Versions = {'node': node, 'node_list': node_list}
+versions: Versions = {'node': node, 'node_list': node_list, 'nodes': nodes}

@@ -14,18 +14,18 @@ See the License for the specific language governing permissions and
 limitations under the License.
 """
 
-import json
 from typing import Any, Protocol, TypedDict
 
 from pydantic import BaseModel, Field
 
 from .models import Message, PromptFunction, PromptVersion
+from .prompt_helpers import to_prompt_json
 
 
 class Summary(BaseModel):
     summary: str = Field(
         ...,
-        description='Summary containing the important information about the entity. Under 500 words',
+        description='Summary containing the important information about the entity. Under 250 words',
     )
 
 
@@ -56,10 +56,10 @@ def summarize_pair(context: dict[str, Any]) -> list[Message]:
             content=f"""
         Synthesize the information from the following two summaries into a single succinct summary.
         
-        Summaries must be under 500 words.
+        Summaries must be under 250 words.
 
         Summaries:
-        {json.dumps(context['node_summaries'], indent=2)}
+        {to_prompt_json(context['node_summaries'], ensure_ascii=context.get('ensure_ascii', True), indent=2)}
         """,
         ),
     ]
@@ -76,13 +76,13 @@ def summarize_context(context: dict[str, Any]) -> list[Message]:
             content=f"""
             
         <MESSAGES>
-        {json.dumps(context['previous_episodes'], indent=2)}
-        {json.dumps(context['episode_content'], indent=2)}
+        {to_prompt_json(context['previous_episodes'], ensure_ascii=context.get('ensure_ascii', True), indent=2)}
+        {to_prompt_json(context['episode_content'], ensure_ascii=context.get('ensure_ascii', True), indent=2)}
         </MESSAGES>
         
         Given the above MESSAGES and the following ENTITY name, create a summary for the ENTITY. Your summary must only use
         information from the provided MESSAGES. Your summary should also only contain information relevant to the
-        provided ENTITY. Summaries must be under 500 words.
+        provided ENTITY. Summaries must be under 250 words.
         
         In addition, extract any values for the provided entity properties based on their descriptions.
         If the value of the entity property cannot be found in the current context, set the value of the property to the Python value None.
@@ -100,7 +100,7 @@ def summarize_context(context: dict[str, Any]) -> list[Message]:
         </ENTITY CONTEXT>
         
         <ATTRIBUTES>
-        {json.dumps(context['attributes'], indent=2)}
+        {to_prompt_json(context['attributes'], ensure_ascii=context.get('ensure_ascii', True), indent=2)}
         </ATTRIBUTES>
         """,
         ),
@@ -117,10 +117,10 @@ def summary_description(context: dict[str, Any]) -> list[Message]:
             role='user',
             content=f"""
         Create a short one sentence description of the summary that explains what kind of information is summarized.
-        Summaries must be under 500 words.
+        Summaries must be under 250 words.
 
         Summary:
-        {json.dumps(context['summary'], indent=2)}
+        {to_prompt_json(context['summary'], ensure_ascii=context.get('ensure_ascii', True), indent=2)}
         """,
         ),
     ]

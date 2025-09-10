@@ -20,6 +20,7 @@ from time import time
 
 from graphiti_core.edges import EntityEdge
 from graphiti_core.llm_client import LLMClient
+from graphiti_core.llm_client.config import ModelSize
 from graphiti_core.nodes import EpisodicNode
 from graphiti_core.prompts import prompt_library
 from graphiti_core.prompts.extract_edge_dates import EdgeDates
@@ -34,12 +35,14 @@ async def extract_edge_dates(
     edge: EntityEdge,
     current_episode: EpisodicNode,
     previous_episodes: list[EpisodicNode],
+    ensure_ascii: bool = False,
 ) -> tuple[datetime | None, datetime | None]:
     context = {
         'edge_fact': edge.fact,
         'current_episode': current_episode.content,
         'previous_episodes': [ep.content for ep in previous_episodes],
         'reference_timestamp': current_episode.valid_at.isoformat(),
+        'ensure_ascii': ensure_ascii,
     }
     llm_response = await llm_client.generate_response(
         prompt_library.extract_edge_dates.v1(context), response_model=EdgeDates
@@ -69,31 +72,33 @@ async def extract_edge_dates(
 
 
 async def get_edge_contradictions(
-    llm_client: LLMClient, new_edge: EntityEdge, existing_edges: list[EntityEdge]
+    llm_client: LLMClient,
+    new_edge: EntityEdge,
+    existing_edges: list[EntityEdge],
+    ensure_ascii: bool = False,
 ) -> list[EntityEdge]:
     start = time()
-    existing_edge_map = {edge.uuid: edge for edge in existing_edges}
 
-    new_edge_context = {'uuid': new_edge.uuid, 'name': new_edge.name, 'fact': new_edge.fact}
+    new_edge_context = {'fact': new_edge.fact}
     existing_edge_context = [
-        {'uuid': existing_edge.uuid, 'name': existing_edge.name, 'fact': existing_edge.fact}
-        for existing_edge in existing_edges
+        {'id': i, 'fact': existing_edge.fact} for i, existing_edge in enumerate(existing_edges)
     ]
 
-    context = {'new_edge': new_edge_context, 'existing_edges': existing_edge_context}
+    context = {
+        'new_edge': new_edge_context,
+        'existing_edges': existing_edge_context,
+        'ensure_ascii': ensure_ascii,
+    }
 
     llm_response = await llm_client.generate_response(
-        prompt_library.invalidate_edges.v2(context), response_model=InvalidatedEdges
+        prompt_library.invalidate_edges.v2(context),
+        response_model=InvalidatedEdges,
+        model_size=ModelSize.small,
     )
 
-    contradicted_edge_data = llm_response.get('invalidated_edges', [])
+    contradicted_facts: list[int] = llm_response.get('contradicted_facts', [])
 
-    contradicted_edges: list[EntityEdge] = []
-    for edge_data in contradicted_edge_data:
-        if edge_data['uuid'] in existing_edge_map:
-            contradicted_edge = existing_edge_map[edge_data['uuid']]
-            contradicted_edge.fact = edge_data['fact']
-            contradicted_edges.append(contradicted_edge)
+    contradicted_edges: list[EntityEdge] = [existing_edges[i] for i in contradicted_facts]
 
     end = time()
     logger.debug(
